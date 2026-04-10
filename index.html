@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ruffle Flash Player</title>
+
+<script src="https://unpkg.com/@ruffle-rs/ruffle"></script>
+
+<script>
+window.RufflePlayer = window.RufflePlayer || {};
+
+window.RufflePlayer.config = {
+    publicPath: "https://unpkg.com/@ruffle-rs/ruffle",
+    quality: "high",
+    autoplay: "on",
+    scale: "showAll",
+    forceScale: true,
+
+    fontSources: [
+        "./NotoSansSC-Regular.ttf"
+    ],
+
+    defaultFonts: {
+        sans: [
+            "Noto Sans SC",
+            "Microsoft YaHei",
+            "SimHei",
+            "SimSun",
+            "WenQuanYi Micro Hei"
+        ],
+        serif: [
+            "Noto Sans SC",
+            "SimSun",
+            "NSimSun",
+            "FangSong"
+        ],
+        typewriter: [
+            "Noto Sans SC",
+            "SimSun",
+            "NSimSun",
+            "KaiTi"
+        ]
+    },
+
+    deviceFontRenderer: "canvas",
+
+    contextMenu: "off",
+    allowScriptAccess: false,
+    unmuteOverlay: "hidden",
+    splashScreen: false,
+    backgroundColor: "#000000",
+    openUrlMode: "deny"
+};
+</script>
+
+<style>
+body {
+    margin:0;
+    background:#000;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    height:100vh;
+}
+#flash-container {
+    width:100%;
+    height:100%;
+}
+</style>
+</head>
+
+<body>
+
+<div id="flash-container"></div>
+
+<script>
+async function start() {
+    const ruffle = window.RufflePlayer.newest();
+    const player = ruffle.createPlayer();
+    document.getElementById("flash-container").appendChild(player);
+    await player.load({ url: "1.swf" });
+}
+start();
+</script>
+
+</body>
+</html>
