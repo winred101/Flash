@@ -1,88 +1,431 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ruffle Flash Player</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Ruffle Flash Player</title>
+    <script src="https://unpkg.com/@ruffle-rs/ruffle"></script>
+    <style>
+        :root { --key-size: 40px; --key-gap: 5px; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0; padding: 0; display: flex; flex-direction: column;
+            align-items: center; background-color: #000; color: #fff;
+            -webkit-tap-highlight-color: transparent;
+            overflow: hidden;
+        }
+        body.zoomed-mode-active > h1,
+        body.zoomed-mode-active > .container > #key-config-controls { display: none; }
 
-<script src="https://unpkg.com/@ruffle-rs/ruffle"></script>
+        h1 { text-align: center; font-size: 1.5em; }
+        .container { position: relative; width: 100%; height: 100vh; display:flex; justify-content:center; align-items:center; }
+        #flash-container { width: 100%; height: 100%; background-color: #000; position: relative; }
+        #flash-container > ruffle-player { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        #flash-container.zoomed-to-fit { position: fixed; top: 0; left: 0; right: 0; bottom: 0; margin: auto; z-index: 50; border: none; }
+        
+        .virtual-key-container {
+            position: fixed;
+            z-index: 100;
+            bottom: 20px;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.5s ease-in-out;
+        }
 
-<script>
-window.RufflePlayer = window.RufflePlayer || {};
+        body.virtual-keys-active .virtual-key-container {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        #dpad-keys-container {
+            left: 20px; display: grid;
+            width: calc(var(--key-size) * 3.2); height: calc(var(--key-size) * 3.2);
+            grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr 1fr;
+            gap: 0;
+        }
+        
+        #numpad-keys-container { right: 20px; display: grid; grid-template-columns: repeat(3, var(--key-size)); gap: var(--key-gap); }
+        
+        .virtual-key {
+            width: var(--key-size); height: var(--key-size);
+            background-color: rgba(80, 80, 80, 0.23); color: white;
+            border: 1px solid rgba(255, 255, 255, 0.5); border-radius: 8px;
+            display: flex; justify-content: center; align-items: center;
+            font-size: 16px; font-weight: bold; cursor: pointer; user-select: none;
+        }
 
-window.RufflePlayer.config = {
-    publicPath: "https://unpkg.com/@ruffle-rs/ruffle",
-    quality: "high",
-    autoplay: "on",
-    scale: "showAll",
-    forceScale: true,
+        #dpad-keys-container .virtual-key { width: auto; height: auto; }
+        .virtual-key.space-key-text { font-size: 13px; }
 
-    fontSources: [
-        "./NotoSansSC-Regular.ttf"
-    ],
+        #key-up { grid-column: 1 / 3; grid-row: 1; border-radius: 8px 8px 0 0; }
+        #key-down { grid-column: 1 / 3; grid-row: 3; border-radius: 0 0 8px 8px; }
+        #key-left { grid-column: 1; grid-row: 2; border-radius: 0; border-right-width: 0.5px; }
+        #key-right { grid-column: 2; grid-row: 2; border-radius: 0; border-left-width: 0.5px; }
+        
+        #key-config-controls { margin: 20px; padding: 15px; background-color: #fff; border: 1px solid #ddd; border-radius: 8px; width: 90%; max-width:400px; box-sizing: border-box; }
+        #key-config-controls h3 { margin-top: 0; text-align: center; margin-bottom: 15px; color: #333; }
+        
+        #key-config-buttons-container { display: flex; justify-content: space-between; align-items: center; padding: 0 10px; }
+        .config-group { display: grid; gap: 5px; }
+        #config-dpad { grid-template-areas: ". up ." "left center right" ". down ."; grid-template-rows: auto; grid-template-columns: 45px auto 45px; align-items: center; justify-content: center; }
+        #config-numpad { grid-template-columns: repeat(3, 1fr); }
+        #key-config-buttons-container button { width: 45px; height: 45px; padding: 0; font-size: 16px; display: flex; justify-content: center; align-items: center; border-radius: 5px; }
+        #config-dpad button[data-key-id='key-up'] { grid-area: up; }
+        #config-dpad button[data-key-id='key-down'] { grid-area: down; }
+        #config-dpad button[data-key-id='key-left'] { grid-area: left; }
+        #config-dpad button[data-key-id='key-right'] { grid-area: right; }
+        
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.6); display: none; justify-content: center; align-items: center; }
+        #key-config-modal, #dpad-preset-modal { z-index: 200; }
+        .modal-content { background-color: #f7f7f7; padding: 15px; border-radius: 12px; text-align: center; width: 90%; max-width: 320px; display: flex; flex-direction: column; box-shadow: 0 4px 15px rgba(0,0,0,0.2); color: #333; }
+        .modal-content h3 { margin-top: 0; margin-bottom: 10px; }
+        #key-selector-list { background-color: #fff; border: 1px solid #ddd; border-radius: 8px; max-height: 50vh; overflow-y: auto; text-align: left; }
+        .key-category { padding: 8px 12px; background-color: #efefef; font-weight: bold; color: #555; font-size: 0.9em; position: sticky; top: 0; }
+        .key-option { padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; }
+        .key-option:hover { background-color: #e8f4ff; }
+        .key-option .key-name { font-weight: bold; } .key-option .key-value { float: right; color: #888; }
+        .modal-buttons { display: flex; flex-direction: column; gap: 10px; margin-top: 15px; }
 
-    defaultFonts: {
-        sans: [
-            "Noto Sans SC",
-            "Microsoft YaHei",
-            "SimHei",
-            "SimSun",
-            "WenQuanYi Micro Hei"
-        ],
-        serif: [
-            "Noto Sans SC",
-            "SimSun",
-            "NSimSun",
-            "FangSong"
-        ],
-        typewriter: [
-            "Noto Sans SC",
-            "SimSun",
-            "NSimSun",
-            "KaiTi"
-        ]
-    },
+        #custom-popup {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, rgba(0, 0, 0, 0.8), rgba(30, 30, 60, 0.9));
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+        }
+        
+        #custom-popup.show {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        #popup-content {
+            background: linear-gradient(145deg, #ffffff, #f8f9ff);
+            padding: 35px 30px;
+            border-radius: 20px;
+            text-align: center;
+            width: 85%;
+            max-width: 350px;
+            position: relative;
+            transform: scale(0.5) rotate(5deg);
+            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            box-shadow: 
+                0 25px 50px rgba(0, 0, 0, 0.2),
+                0 10px 25px rgba(0, 0, 0, 0.1),
+                inset 0 1px 0 rgba(255, 255, 255, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+        
+        #popup-content::before {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            right: -2px;
+            bottom: -2px;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4, #45b7d1, #96ceb4, #ffeaa7);
+            border-radius: 22px;
+            z-index: -1;
+            opacity: 0.3;
+            animation: color-shift 4s ease-in-out infinite;
+        }
+        
+        @keyframes color-shift {
+            0% { filter: hue-rotate(0deg); }
+            25% { filter: hue-rotate(90deg); }
+            50% { filter: hue-rotate(180deg); }
+            75% { filter: hue-rotate(270deg); }
+            100% { filter: hue-rotate(360deg); }
+        }
+        
+        #custom-popup.show #popup-content {
+            transform: scale(1) rotate(0deg);
+        }
+        
+        #popup-message {
+            color: #2c3e50;
+            margin-bottom: 25px;
+            font-size: 17px;
+            line-height: 1.6;
+            font-weight: 500;
+        }
+        
+        #popup-message-line1 {
+            margin-bottom: 12px;
+            font-weight: 600;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-size: 18px;
+        }
+        
+        #popup-message-line1::before {
+            content: '⚔️';
+            margin-right: 8px;
+            -webkit-text-fill-color: initial;
+        }
 
-    deviceFontRenderer: "canvas",
+        #popup-message-line1::after {
+            content: '⚔️';
+            margin-left: 8px;
+            -webkit-text-fill-color: initial;
+        }
+        
+        @keyframes dynamic-glow {
+          0%, 100% {
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3),
+                        0 0 6px rgba(220, 225, 255, 0.4),
+                        0 0 4px rgba(200, 200, 220, 0.5);
+          }
+          50% {
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3),
+                        0 0 16px rgba(220, 225, 255, 0.6),
+                        0 0 8px rgba(200, 200, 220, 0.7);
+          }
+        }
 
-    contextMenu: "off",
-    allowScriptAccess: false,
-    unmuteOverlay: "hidden",
-    splashScreen: false,
-    backgroundColor: "#000000",
-    openUrlMode: "deny"
-};
-</script>
+        #copy-group-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 25px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            width: 100%;
+            position: relative;
+            overflow: hidden;
+            animation: dynamic-glow 3s infinite ease-in-out;
+        }
 
-<style>
-body {
-    margin:0;
-    background:#000;
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    height:100vh;
-}
-#flash-container {
-    width:100%;
-    height:100%;
-}
-</style>
+        #copy-group-btn:active {
+            transform: translateY(4px) scale(0.9); 
+            background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+        }
+
+        @keyframes popup-exit-bounce-fall {
+            0% { transform: translateY(0); opacity: 1; }
+            20% { transform: translateY(-20px); opacity: 1; }
+            40% { transform: translateY(0); opacity: 1; }
+            80% { transform: translateY(50px); opacity: 0.8; }
+            100% { transform: translateY(150px); opacity: 0; }
+        }
+
+        #popup-content.popup-exit-animating {
+            animation: popup-exit-bounce-fall 0.8s forwards ease-in !important;
+        }
+
+        /* 新增：隱晦的全螢幕虛擬按鍵 */
+        #mini-fullscreen-btn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 34px;
+            height: 34px;
+            background-color: rgba(30, 30, 30, 0.8);
+            color: rgba(255, 255, 255, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0);
+            border-radius: 8px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 20px;
+            cursor: pointer;
+            z-index: 101;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.4s ease-in-out;
+            user-select: none;
+        }
+        #mini-fullscreen-btn:active {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+        /* 只有在虛擬按鍵啟用且包含 show-btn 類別（非全螢幕）時才顯示 */
+        body.virtual-keys-active #mini-fullscreen-btn.show-btn {
+            opacity: 1;
+            visibility: visible;
+        }
+    </style>
 </head>
-
 <body>
+    <div id="custom-popup">
+        <div id="popup-content">
+            <div id="popup-message">
+                <div id="popup-message-line1">游戏即将开始</div>
+                <div>为获取最佳体验，请点击下方按钮进入全屏模式</div>
+            </div>
+            <button id="copy-group-btn">开始游戏</button>
+        </div>
+    </div>
+    
+    <h1>Ruffle Flash Player</h1>
 
-<div id="flash-container"></div>
+    <div id="mini-fullscreen-btn" class="show-btn">⛶</div>
 
-<script>
-async function start() {
-    const ruffle = window.RufflePlayer.newest();
-    const player = ruffle.createPlayer();
-    document.getElementById("flash-container").appendChild(player);
-    await player.load({ url: "1.swf" });
-}
-start();
-</script>
+    <div class="container">
+        <div id="key-config-controls">
+            <h3 data-i18n-key="configTitle"></h3>
+            <div id="key-config-buttons-container"></div>
+        </div>
+        <div id="flash-container"></div>
+    </div>
+    
+    <div id="dpad-keys-container" class="virtual-key-container">
+        <div class="virtual-key" id="key-up"></div> <div class="virtual-key" id="key-down"></div> <div class="virtual-key" id="key-left"></div> <div class="virtual-key" id="key-right"></div>
+    </div>
+    <div id="numpad-keys-container" class="virtual-key-container">
+        <div class="virtual-key" id="key-pad-7"></div><div class="virtual-key" id="key-pad-8"></div><div class="virtual-key" id="key-pad-9"></div>
+        <div class="virtual-key" id="key-pad-4"></div><div class="virtual-key" id="key-pad-5"></div><div class="virtual-key" id="key-pad-6"></div>
+        <div class="virtual-key" id="key-pad-1"></div><div class="virtual-key" id="key-pad-2"></div><div class="virtual-key" id="key-pad-3"></div>
+    </div>
 
-</body>
-</html>
+    <div id="key-config-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 id="key-config-title" data-i18n-key="modalTitle"></h3>
+            <div id="key-selector-list"></div>
+            <div class="modal-buttons">
+                <button id="dpad-preset-btn"></button>
+                <button id="clear-key-btn" data-i18n-key="btnClear"></button>
+                <button id="cancel-key-config-btn" data-i18n-key="btnExit"></button>
+            </div>
+        </div>
+    </div>
+    <div id="dpad-preset-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 data-i18n-key="presetModalTitle"></h3>
+            <div class="modal-buttons">
+                <button id="preset-arrows-btn" data-i18n-key="presetArrows"></button>
+                <button id="preset-wsad-btn" data-i18n-key="presetWSAD"></button>
+                <button id="cancel-preset-btn" data-i18n-key="btnPresetCancel"></button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 彈窗與全螢幕邏輯
+        document.addEventListener('DOMContentLoaded', function() {
+            const popup = document.getElementById('custom-popup');
+            const startBtn = document.getElementById('copy-group-btn');
+            const miniFsBtn = document.getElementById('mini-fullscreen-btn');
+            let isTouchActiveOnButton = false;
+
+            function showVirtualKeys() { document.body.classList.add('virtual-keys-active'); }
+            function closePopupAndShowKeys() {
+                if (!popup.classList.contains('show')) return;
+                popup.classList.remove('show');
+                const popupContent = document.getElementById('popup-content');
+                popupContent.classList.add('popup-exit-animating');
+                popupContent.addEventListener('animationend', function handleAnimEnd() {
+                    popup.style.display = 'none';
+                    popupContent.classList.remove('popup-exit-animating');
+                    popupContent.removeEventListener('animationend', handleAnimEnd);
+                });
+                showVirtualKeys();
+            }
+            setTimeout(() => { popup.style.display = 'flex'; popup.classList.add('show'); }, 1);
+            
+            // 獨立出全螢幕核心邏輯
+            function enterFullscreenAction() {
+                const docElm = document.documentElement;
+                if (docElm.requestFullscreen) docElm.requestFullscreen();
+                else if (docElm.webkitRequestFullScreen) docElm.webkitRequestFullScreen();
+                if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {});
+            }
+
+            // 監聽全螢幕狀態，控制小按鈕顯示
+            function checkFullscreenState() {
+                const isFull = document.fullscreenElement || document.webkitFullscreenElement;
+                if (isFull) {
+                    miniFsBtn.classList.remove('show-btn');
+                } else {
+                    miniFsBtn.classList.add('show-btn');
+                }
+            }
+            document.addEventListener('fullscreenchange', checkFullscreenState);
+            document.addEventListener('webkitfullscreenchange', checkFullscreenState);
+
+            function handleStartGame() {
+                enterFullscreenAction();
+                closePopupAndShowKeys();
+            }
+            
+            startBtn.addEventListener('touchstart', function(e) { e.preventDefault(); isTouchActiveOnButton = true; this.classList.add('is-active'); });
+            document.addEventListener('touchend', function() { if (isTouchActiveOnButton) handleStartGame(); isTouchActiveOnButton = false; startBtn.classList.remove('is-active'); });
+            startBtn.addEventListener('click', function() { if (!('ontouchstart' in window)) handleStartGame(); });
+
+            // 綁定隱晦按鈕事件
+            miniFsBtn.addEventListener('touchstart', function(e) { e.preventDefault(); enterFullscreenAction(); });
+            miniFsBtn.addEventListener('click', function(e) { e.preventDefault(); enterFullscreenAction(); });
+        });
+
+        window.RufflePlayer = window.RufflePlayer || {};
+        
+        // ==========================================
+        // 重要：這裡嵌入了修復文字的 Ruffle 設定
+        // ==========================================
+        window.RufflePlayer.config = {
+            publicPath: "https://unpkg.com/@ruffle-rs/ruffle",
+            quality: "high",
+            autoplay: "on",
+            scale: "showAll",
+            forceScale: true,
+
+            // 文字修復手段 1: 字體來源
+            fontSources: [
+                "./NotoSansSC-Regular.ttf"
+            ],
+
+            // 文字修復手段 2: 預設字體對應表
+            defaultFonts: {
+                sans: [
+                    "Noto Sans SC",
+                    "Microsoft YaHei",
+                    "SimHei",
+                    "SimSun",
+                    "WenQuanYi Micro Hei"
+                ],
+                serif: [
+                    "Noto Sans SC",
+                    "SimSun",
+                    "NSimSun",
+                    "FangSong"
+                ],
+                typewriter: [
+                    "Noto Sans SC",
+                    "SimSun",
+                    "NSimSun",
+                    "KaiTi"
+                ]
+            },
+
+            // 文字修復手段 3: 強制使用 Canvas 渲染器
+            deviceFontRenderer: "canvas",
+
+            contextMenu: "off",
+            allowScriptAccess: false,
+            unmuteOverlay: "hidden",
+            splashScreen: false,
+            backgroundColor: "#000000",
+            openUrlMode: "deny"
+        };
+        // ==========================================
+
+        const translations = {
+            'zh-TW': { configTitle: "設定各按鍵功能", modalTitle: "選擇一個按鍵", btnClear: "清除", btnExit: "退出", btnPresetCancel: "取消", btnDPadPreset: "方向鍵常用設定", btnRestoreNumpad: "恢復九宮格預設值", presetModalTitle: "選擇方向鍵預設", presetArrows: "設定為 ↑↓←→", presetWSAD: "設定為 WSAD" }
+        };
+        const KEY_LIST_I18N = {
+            'zh-TW': { "常用控制": [ { name: "上", value: "ArrowUp" }, { name: "下", value: "ArrowDown" }, { name: "左", value: "ArrowLeft" }, { name: "右", value: "ArrowRight" }, { name: "空白鍵", value: " " }, { name: "確認 / 換行", value: "Enter" }, { name: "跳脫", value: "Escape" }, { name: "位移", value: "Shift" }, { name: "控制", value: "Control" }, { name: "替代", value: "Alt" } ], "字母": "abcdefghijklmnopqrstuvwxyz".split('').map(k => ({ name: k.toUpperCase(), value: k })), "數字": "0123456789".split('').map(k => ({ name: k, value: k })), "功能鍵": Array.from({length: 12}, (_, i) => ({ name: `F${i+1}`, value: `F${i+1}` })), "其他": [ { name: "Tab", value: "Tab" }, { name: "刪除", value: "Backspace" }, { name: "插入", value: "Insert" } ] }
+        };
+        const allDOMElements = { body: document.body, flashContainer: document.getElementById('flash-container'), dpadContainer: document.getElementById('dpad-keys-container'), numpadContainer: document.getElementById('numpad-keys-container'), keyConfigControls: document.getElementById('key-config-controls'), keyConfigButtonsContainer: document.getElementById('key-config-buttons-container'), keyConfigModal: document.getElementById('key-config-modal'), keySelectorList: document.getElementById('key-selector-list'), dpadPresetModal: document.getElementById('dpad-preset-modal'), dpadPresetBtn: document.getElementById('dpad-preset-btn'), presetArrowsBtn: document.getElementById('preset-arrows-btn'), presetWsadBtn: document.getElementById('preset-wsad-btn'), cancel
